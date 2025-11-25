@@ -41,28 +41,49 @@ def parse_document(filename: str, content: bytes) -> str:
         return content.decode('utf-8', errors='ignore')
 
 # RAG functions
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def get_embeddings():
-    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    """Initialize embeddings with a smaller, faster model"""
+    try:
+        # Using a smaller model for faster loading on Streamlit Cloud
+        return HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={'device': 'cpu'},
+            encode_kwargs={'normalize_embeddings': True}
+        )
+    except Exception as e:
+        st.error(f"Error loading embeddings: {e}")
+        return None
 
 def ingest_documents(documents: List[Dict[str, str]], embeddings):
-    docs = []
-    for doc in documents:
-        docs.append(Document(page_content=doc['content'], metadata={"source": doc['source']}))
+    """Ingest documents into vector database with progress tracking"""
+    if not embeddings:
+        return None, 0
     
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
-        length_function=len,
-    )
-    chunks = text_splitter.split_documents(docs)
-    
-    if chunks:
-        vector_db = Chroma.from_documents(
-            chunks, embeddings, persist_directory="./chroma_db"
+    try:
+        docs = []
+        for doc in documents:
+            docs.append(Document(page_content=doc['content'], metadata={"source": doc['source']}))
+        
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200,
+            length_function=len,
         )
-        return vector_db, len(chunks)
-    return None, 0
+        chunks = text_splitter.split_documents(docs)
+        
+        if chunks:
+            # Create vector DB without persistence to avoid file system issues on Streamlit Cloud
+            vector_db = Chroma.from_documents(
+                chunks, 
+                embeddings,
+                collection_name="qa_agent_kb"
+            )
+            return vector_db, len(chunks)
+        return None, 0
+    except Exception as e:
+        st.error(f"Error ingesting documents: {e}")
+        return None, 0
 
 def retrieve_context(vector_db, query: str, k: int = 5):
     if not vector_db:
@@ -142,7 +163,7 @@ st.markdown("Generate Test Cases and Selenium Scripts from Documentation")
 
 # Sidebar
 with st.sidebar:
-    st.header("⚙️ Configuration")
+    st.header("⚙ Configuration")
     
     api_key = st.text_input("OpenAI API Key", type="password", help="Enter your OpenAI API key")
     
@@ -150,19 +171,26 @@ with st.sidebar:
         st.session_state.llm = initialize_llm(api_key)
         st.success("✅ LLM Initialized")
     
+    # Load embeddings on demand, not at startup
     if st.session_state.embeddings is None:
-        with st.spinner("Loading embeddings model..."):
-            st.session_state.embeddings = get_embeddings()
-        st.success("✅ Embeddings Loaded")
+        if st.button("🔄 Initialize Embeddings Model"):
+            with st.spinner("Loading embeddings model... This may take a minute..."):
+                st.session_state.embeddings = get_embeddings()
+            if st.session_state.embeddings:
+                st.success("✅ Embeddings Loaded")
+            else:
+                st.error("❌ Failed to load embeddings")
+    else:
+        st.success("✅ Embeddings Ready")
     
     st.divider()
     st.markdown("### 📊 Status")
     if st.session_state.vector_db:
         st.success("✅ Knowledge Base Ready")
     else:
-        st.warning("⚠️ No Knowledge Base")
+        st.warning("⚠ No Knowledge Base")
     
-    if st.button("🗑️ Clear Knowledge Base"):
+    if st.button("🗑 Clear Knowledge Base"):
         st.session_state.vector_db = None
         st.session_state.test_cases = None
         st.rerun()
@@ -175,42 +203,46 @@ with tab1:
     st.header("Upload Project Assets")
     st.markdown("Upload your project documentation and HTML files to build the knowledge base.")
     
-    uploaded_files = st.file_uploader(
-        "Upload Support Docs & HTML", 
-        accept_multiple_files=True,
-        help="Supported formats: .md, .txt, .json, .html"
-    )
-    
-    if st.button("🔨 Build Knowledge Base", type="primary"):
-        if uploaded_files:
-            documents = []
-            for file in uploaded_files:
-                content = file.read()
-                text = parse_document(file.name, content)
-                documents.append({"content": text, "source": file.name})
+    if not st.session_state.embeddings:
+        st.warning("⚠ Please initialize the embeddings model first (see sidebar)")
+        st.info("Click the '🔄 Initialize Embeddings Model' button in the sidebar to get started.")
+    else:
+        uploaded_files = st.file_uploader(
+            "Upload Support Docs & HTML", 
+            accept_multiple_files=True,
+            help="Supported formats: .md, .txt, .json, .html"
+        )
+        
+        if st.button("🔨 Build Knowledge Base", type="primary"):
+            if uploaded_files:
+                documents = []
+                for file in uploaded_files:
+                    content = file.read()
+                    text = parse_document(file.name, content)
+                    documents.append({"content": text, "source": file.name})
+                    
+                    # Store HTML content if it's an HTML file
+                    if file.name.endswith('.html'):
+                        st.session_state.html_content = text
                 
-                # Store HTML content if it's an HTML file
-                if file.name.endswith('.html'):
-                    st.session_state.html_content = text
-            
-            with st.spinner("Ingesting documents and building vector database..."):
-                vector_db, count = ingest_documents(documents, st.session_state.embeddings)
-                st.session_state.vector_db = vector_db
-            
-            if vector_db:
-                st.success(f"✅ Successfully ingested {count} chunks from {len(uploaded_files)} files!")
-                st.balloons()
+                with st.spinner("Ingesting documents and building vector database..."):
+                    vector_db, count = ingest_documents(documents, st.session_state.embeddings)
+                    st.session_state.vector_db = vector_db
+                
+                if vector_db:
+                    st.success(f"✅ Successfully ingested {count} chunks from {len(uploaded_files)} files!")
+                    st.balloons()
+                else:
+                    st.error("❌ Failed to build knowledge base")
             else:
-                st.error("❌ Failed to build knowledge base")
-        else:
-            st.warning("⚠️ Please upload files first")
+                st.warning("⚠ Please upload files first")
 
 # Tab 2: Test Case Generation
 with tab2:
     st.header("Generate Test Cases")
     
     if not st.session_state.vector_db:
-        st.warning("⚠️ Please build the Knowledge Base first (Tab 1)")
+        st.warning("⚠ Please build the Knowledge Base first (Tab 1)")
     else:
         user_query = st.text_area(
             "Describe the feature or test scope",
@@ -248,20 +280,20 @@ with tab2:
             st.subheader("📋 Generated Test Cases")
             
             for tc in st.session_state.test_cases:
-                with st.expander(f"**{tc.get('id', 'N/A')}**: {tc.get('scenario', 'No Scenario')}"):
+                with st.expander(f"{tc.get('id', 'N/A')}: {tc.get('scenario', 'No Scenario')}"):
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.markdown(f"**Feature:** {tc.get('feature')}")
-                        st.markdown(f"**Expected Result:** {tc.get('expected_result')}")
+                        st.markdown(f"*Feature:* {tc.get('feature')}")
+                        st.markdown(f"*Expected Result:* {tc.get('expected_result')}")
                     with col2:
-                        st.markdown(f"**Grounded In:** {tc.get('grounded_in')}")
+                        st.markdown(f"*Grounded In:* {tc.get('grounded_in')}")
 
 # Tab 3: Script Generation
 with tab3:
     st.header("Generate Selenium Script")
     
     if 'test_cases' not in st.session_state or not st.session_state.test_cases:
-        st.info("ℹ️ Generate Test Cases in Tab 2 first")
+        st.info("ℹ Generate Test Cases in Tab 2 first")
     else:
         # Select test case
         tc_options = {
@@ -309,7 +341,7 @@ with tab3:
                     
                     # Download button
                     st.download_button(
-                        label="⬇️ Download Script",
+                        label="⬇ Download Script",
                         data=script,
                         file_name=f"{selected_tc.get('id', 'test')}_script.py",
                         mime="text/plain"
