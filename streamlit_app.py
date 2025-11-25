@@ -8,7 +8,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 
@@ -93,9 +93,8 @@ def retrieve_context(vector_db, query: str, k: int = 5):
 # LLM functions
 def initialize_llm(api_key: str):
     if api_key:
-        os.environ["GOOGLE_API_KEY"] = api_key
-        # Using Gemini 2.0 Flash (free and fast)
-        return ChatGoogleGenerativeAI(model="gemini-2.0-flash-exp", temperature=0)
+        os.environ["OPENAI_API_KEY"] = api_key
+        return ChatOpenAI(model="gpt-4.1", temperature=0)
     return None
 
 def generate_test_cases(llm, context: str, query: str):
@@ -166,7 +165,7 @@ st.markdown("Generate Test Cases and Selenium Scripts from Documentation")
 with st.sidebar:
     st.header("⚙ Configuration")
     
-    api_key = st.text_input("Google Gemini API Key (Free)", type="password", help="Get your free API key from https://aistudio.google.com/apikey")
+    api_key = st.text_input("OpenAI API Key", type="password", help="Enter your OpenAI API key")
     
     if api_key and st.session_state.llm is None:
         st.session_state.llm = initialize_llm(api_key)
