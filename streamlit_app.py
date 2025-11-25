@@ -94,7 +94,7 @@ def retrieve_context(vector_db, query: str, k: int = 5):
 def initialize_llm(api_key: str):
     if api_key:
         os.environ["OPENAI_API_KEY"] = api_key
-        return ChatOpenAI(model="gpt-4o", temperature=0)
+        return ChatOpenAI(model="gpt-4.1", temperature=0)
     return None
 
 def generate_test_cases(llm, context: str, query: str):
