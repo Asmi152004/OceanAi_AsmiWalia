@@ -1,0 +1,16 @@
+# UI/UX Guidelines
+
+## Color Palette
+- **Primary Action (Pay Now)**: Green (#28a745).
+- **Secondary Action (Apply Code)**: Blue (#007bff).
+- **Error Messages**: Red text, visible immediately below the invalid field.
+- **Success Messages**: Green text.
+
+## Form Interaction
+- Validation should trigger on "Pay Now" click.
+- Invalid fields should show an error message.
+- "Pay Now" button should disappear or become disabled after successful submission.
+
+## Layout
+- Cart summary should be visible at all times.
+- Shipping options should be mutually exclusive (Radio buttons).

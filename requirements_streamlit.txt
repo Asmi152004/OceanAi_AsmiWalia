@@ -1,0 +1,8 @@
+streamlit
+langchain-community
+langchain-text-splitters
+langchain-core
+chromadb
+sentence-transformers
+beautifulsoup4
+langchain-openai
